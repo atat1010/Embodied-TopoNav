@@ -11,6 +11,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(message_filters REQUIRED)
@@ -54,6 +55,7 @@ ament_target_dependencies(semantic_pointcloud_builder
   rclcpp
   sensor_msgs
   geometry_msgs
+  visualization_msgs
   cv_bridge
   message_filters
   pcl_conversions

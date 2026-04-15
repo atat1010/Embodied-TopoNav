@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <utility>
+#include <unordered_set>
 #include <Eigen/Geometry>
 
 // 包含 ORB-SLAM3 的核心头文件
@@ -29,12 +30,23 @@ public:
         this->declare_parameter<std::string>("mask_topic", "/semantic/mask");
         this->declare_parameter<double>("mask_sync_tolerance", 0.08);
         this->declare_parameter<bool>("yolo_expected", false);
+        this->declare_parameter<std::vector<int64_t>>("dynamic_labels", std::vector<int64_t>{0});
 
         const auto rgb_topic = this->get_parameter("rgb_topic").as_string();
         const auto depth_topic = this->get_parameter("depth_topic").as_string();
         const auto mask_topic = this->get_parameter("mask_topic").as_string();
         mask_sync_tolerance_sec_ = this->get_parameter("mask_sync_tolerance").as_double();
         yolo_expected_ = this->get_parameter("yolo_expected").as_bool();
+        const auto dynamic_labels = this->get_parameter("dynamic_labels").as_integer_array();
+        dynamic_labels_.clear();
+        for (const auto label : dynamic_labels) {
+            if (label >= 0 && label <= 255) {
+                dynamic_labels_.insert(static_cast<uint8_t>(label));
+            }
+        }
+        if (dynamic_labels_.empty()) {
+            dynamic_labels_.insert(static_cast<uint8_t>(0));
+        }
 
         // 1. 初始化订阅器 (默认对齐 TUM ros2bag 话题，可由 launch 覆盖)
         rgb_sub_.subscribe(this, rgb_topic);
@@ -63,6 +75,7 @@ public:
         );
         RCLCPP_INFO(this->get_logger(), "mask_sync_tolerance: %.3f s", mask_sync_tolerance_sec_);
         RCLCPP_INFO(this->get_logger(), "yolo_expected: %s", yolo_expected_ ? "true" : "false");
+        RCLCPP_INFO(this->get_logger(), "dynamic_labels for SLAM binary mask size: %zu", dynamic_labels_.size());
     }
 
 private:
@@ -97,6 +110,8 @@ private:
             std::lock_guard<std::mutex> lock(mask_mutex_);
             if (!latest_mask_.empty()) {
                 const double dt = std::abs((rgb_stamp - latest_mask_stamp_).seconds());
+                // RCLCPP_INFO(this->get_logger(), "当前RGB帧时间戳: %.3f s, 最近mask时间戳: %.3f s, dt=%.3f s",
+                //     rgb_stamp.seconds(), latest_mask_stamp_.seconds(), dt);
                 if (dt <= mask_sync_tolerance_sec_) {
                     has_valid_mask = true;
                 }
@@ -111,7 +126,7 @@ private:
             if ((now - last_mask_mismatch_log_time_).seconds() >= 1.0) {
                 RCLCPP_WARN(
                     this->get_logger(),
-                    "mask 与当前RGB帧时间戳偏差超过阈值(%.3f s)，本帧不使用mask",
+                    "mask 与当前RGB帧时间戳偏差超过阈值(%.3f s)本帧不使用mask",
                     mask_sync_tolerance_sec_
                 );
                 last_mask_mismatch_log_time_ = now;
@@ -228,9 +243,21 @@ private:
             if(mask.type() != CV_8UC1)
                 mask.convertTo(mask, CV_8UC1);
 
+            // combined_mask后处理: dynamic_labels中的类别标为0，其余统一标为255供SLAM使用。
+            cv::Mat slam_mask(mask.rows, mask.cols, CV_8UC1, cv::Scalar(255));
+            for (int v = 0; v < mask.rows; ++v) {
+                const auto* src = mask.ptr<uint8_t>(v);
+                auto* dst = slam_mask.ptr<uint8_t>(v);
+                for (int u = 0; u < mask.cols; ++u) {
+                    if (dynamic_labels_.count(src[u]) > 0) {
+                        dst[u] = 0;
+                    }
+                }
+            }
+
             {
                 std::lock_guard<std::mutex> lock(mask_mutex_);
-                latest_mask_ = mask.clone();
+                latest_mask_ = slam_mask;
                 latest_mask_stamp_ = rclcpp::Time(msgMask->header.stamp);
                 const double mask_ts = latest_mask_stamp_.seconds();
                 mask_arrival_timestamps_.push_back(mask_ts);
@@ -263,6 +290,7 @@ private:
     rclcpp::Time last_mask_mismatch_log_time_{0, 0, RCL_ROS_TIME};
     double mask_sync_tolerance_sec_{0.08};
     bool yolo_expected_{false};
+    std::unordered_set<uint8_t> dynamic_labels_;
 };
 
 int main(int argc, char **argv) {

@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import rclpy
 import torch
+from cv_bridge import CvBridge
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 
@@ -14,7 +15,7 @@ class YoloMaskNode(Node):
         super().__init__('yolo_mask_node')
 
         self.declare_parameter('input_topic', '/camera/rgb/image_color')
-        self.declare_parameter('mask_topic', '/semantic/mask')
+        self.declare_parameter('combined_mask_topic', '/semantic/combined_mask')
         self.declare_parameter('overlay_topic', '/semantic/overlay')
         self.declare_parameter('model_path', 'yolov8n-seg.pt')
         self.declare_parameter('conf', 0.35)
@@ -26,7 +27,7 @@ class YoloMaskNode(Node):
         self.declare_parameter('target_classes', [0])
 
         self.input_topic = self.get_parameter('input_topic').get_parameter_value().string_value
-        self.mask_topic = self.get_parameter('mask_topic').get_parameter_value().string_value
+        self.combined_mask_topic = self.get_parameter('combined_mask_topic').get_parameter_value().string_value
         self.overlay_topic = self.get_parameter('overlay_topic').get_parameter_value().string_value
         self.model_path = self.get_parameter('model_path').get_parameter_value().string_value
         self.conf = self.get_parameter('conf').get_parameter_value().double_value
@@ -39,11 +40,9 @@ class YoloMaskNode(Node):
             self.get_parameter('target_classes').get_parameter_value().integer_array_value
         )
 
-        if not self.target_classes:
-            self.target_classes = {0}
-
-        self.mask_pub = self.create_publisher(Image, self.mask_topic, 10)
+        self.combined_mask_pub = self.create_publisher(Image, self.combined_mask_topic, 10)
         self.overlay_pub = self.create_publisher(Image, self.overlay_topic, 10)
+        self.bridge = CvBridge()
 
         self._busy = False
         self._lock = threading.Lock()
@@ -52,6 +51,8 @@ class YoloMaskNode(Node):
         self._processed_window = 0
         self._dropped_window = 0
         self._latency_sum_ms = 0.0
+        self._combined_convert_sum_ms = 0.0
+        self._overlay_convert_sum_ms = 0.0
         self._window_start = time.monotonic()
 
         try:
@@ -78,12 +79,15 @@ class YoloMaskNode(Node):
             f'YOLO model loaded: {self.model_path}, targets={sorted(self.target_classes)}'
         )
         self.get_logger().info(
+            'combined_mask协议: 0~254=类别ID, 255=背景; 动态类剔除下沉到C++节点执行'
+        )
+        self.get_logger().info(
             f'YOLO inference config: device={self.device}, imgsz={self.imgsz}, half={self.half}'
         )
 
         self.sub = self.create_subscription(Image, self.input_topic, self.image_cb, 10)
         self.get_logger().info(
-            f'Subscribed to {self.input_topic}, publishing mask to {self.mask_topic}'
+            f'Subscribed to {self.input_topic}, publishing combined mask to {self.combined_mask_topic}'
         )
 
     def image_cb(self, msg: Image) -> None:
@@ -97,14 +101,18 @@ class YoloMaskNode(Node):
         try:
             t0 = time.monotonic()
             bgr = self.image_msg_to_bgr(msg)
-            static_mask, overlay = self.infer_mask(bgr)
+            combined_mask, overlay = self.infer_mask(bgr)
 
-            mask_msg = self.numpy_to_image_msg(static_mask, msg.header, 'mono8')
-            mask_msg.header = msg.header
-            self.mask_pub.publish(mask_msg)
+            t_conv = time.monotonic()
+            combined_mask_msg = self.bridge.cv2_to_imgmsg(combined_mask, encoding='mono8')
+            self._combined_convert_sum_ms += (time.monotonic() - t_conv) * 1000.0
+            combined_mask_msg.header = msg.header
+            self.combined_mask_pub.publish(combined_mask_msg)
 
             if self.publish_overlay:
-                overlay_msg = self.numpy_to_image_msg(overlay, msg.header, 'bgr8')
+                t_conv = time.monotonic()
+                overlay_msg = self.bridge.cv2_to_imgmsg(overlay, encoding='bgr8')
+                self._overlay_convert_sum_ms += (time.monotonic() - t_conv) * 1000.0
                 overlay_msg.header = msg.header
                 self.overlay_pub.publish(overlay_msg)
 
@@ -129,9 +137,13 @@ class YoloMaskNode(Node):
         yolo_fps = self._processed_window / elapsed
         dropped_fps = self._dropped_window / elapsed
         avg_latency_ms = self._latency_sum_ms / self._processed_window if self._processed_window > 0 else 0.0
+        avg_combined_convert_ms = self._combined_convert_sum_ms / self._processed_window if self._processed_window > 0 else 0.0
+        avg_overlay_convert_ms = self._overlay_convert_sum_ms / self._processed_window if self._processed_window > 0 else 0.0
         self.get_logger().info(
             f'YOLO FPS({elapsed:.1f}s): {yolo_fps:.1f} | '
             f'avg infer: {avg_latency_ms:.1f} ms | '
+            f'convert(combined/overlay): '
+            f'{avg_combined_convert_ms:.2f}/{avg_overlay_convert_ms:.2f} ms | '
             f'dropped(busy): {self._dropped_window} ({dropped_fps:.1f} fps)'
         )
 
@@ -139,10 +151,12 @@ class YoloMaskNode(Node):
         self._processed_window = 0
         self._dropped_window = 0
         self._latency_sum_ms = 0.0
+        self._combined_convert_sum_ms = 0.0
+        self._overlay_convert_sum_ms = 0.0
 
     def infer_mask(self, bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         h, w = bgr.shape[:2]
-        static_mask = np.full((h, w), 255, dtype=np.uint8)
+        combined_mask = np.full((h, w), 255, dtype=np.uint8)
         overlay = bgr.copy()
 
         results = self.model.predict(
@@ -155,31 +169,29 @@ class YoloMaskNode(Node):
             verbose=False,
         )
         if not results:
-            return static_mask, overlay
+            return combined_mask, overlay
 
         result = results[0]
         if result.masks is None or result.boxes is None:
-            return static_mask, overlay
+            return combined_mask, overlay
 
         cls_ids = result.boxes.cls.cpu().numpy().astype(np.int32)
         masks = result.masks.data.cpu().numpy()
 
         for i, cls_id in enumerate(cls_ids):
-            if cls_id not in self.target_classes:
-                continue
-
             dyn = masks[i] > 0.5    # mask[i] 依旧是全景图(原始尺寸)
             if dyn.shape[0] != h or dyn.shape[1] != w:
                 dyn = cv2.resize(dyn.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0
 
-            static_mask[dyn] = 0
-            if self.publish_overlay:
+            # 协议: 0~254为类别ID, 255为背景。
+            combined_mask[dyn] = np.uint8(cls_id)
+            if self.publish_overlay and cls_id in self.target_classes:
                 overlay[dyn] = (0, 0, 255)
 
         if self.publish_overlay:
             overlay = cv2.addWeighted(bgr, 0.7, overlay, 0.3, 0)
 
-        return static_mask, overlay
+        return combined_mask, overlay
 
     def image_msg_to_bgr(self, msg: Image) -> np.ndarray:
         if msg.encoding not in ('rgb8', 'bgr8'):
@@ -190,28 +202,6 @@ class YoloMaskNode(Node):
         if msg.encoding == 'rgb8':
             img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         return img
-
-    def numpy_to_image_msg(self, img: np.ndarray, header, encoding: str) -> Image:
-        msg = Image()
-        msg.header = header
-        msg.height = int(img.shape[0])
-        msg.width = int(img.shape[1])
-        msg.encoding = encoding
-        msg.is_bigendian = 0
-
-        if encoding == 'mono8':
-            mono = np.ascontiguousarray(img.astype(np.uint8))
-            msg.step = msg.width
-            msg.data = mono.tobytes()
-        elif encoding == 'bgr8':
-            bgr = np.ascontiguousarray(img.astype(np.uint8))
-            msg.step = msg.width * 3
-            msg.data = bgr.tobytes()
-        else:
-            raise ValueError(f'Unsupported output encoding: {encoding}')
-
-        return msg
-
 
 def main() -> None:
     rclpy.init()

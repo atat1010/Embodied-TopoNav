@@ -21,4 +21,5 @@ __pycache__/
 src/ros2bag/
 src/weights/
 src/YOLOv8-ORB-SLAM3
+src/orb_slam3_ros2/docs/
 

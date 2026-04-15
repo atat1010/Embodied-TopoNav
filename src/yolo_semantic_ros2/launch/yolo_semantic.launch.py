@@ -12,7 +12,7 @@ def generate_launch_description():
     declare_args = [
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('input_topic', default_value='/camera/rgb/image_color'),
-        DeclareLaunchArgument('mask_topic', default_value='/semantic/mask'),
+        DeclareLaunchArgument('combined_mask_topic', default_value='/semantic/combined_mask'),
         DeclareLaunchArgument('overlay_topic', default_value='/semantic/overlay'),
         DeclareLaunchArgument('model_path', default_value=default_model_path),
     ]
@@ -27,7 +27,7 @@ def generate_launch_description():
             parameters=[{
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
                 'input_topic': LaunchConfiguration('input_topic'),
-                'mask_topic': LaunchConfiguration('mask_topic'),
+                'combined_mask_topic': LaunchConfiguration('combined_mask_topic'),
                 'overlay_topic': LaunchConfiguration('overlay_topic'),
                 'model_path': LaunchConfiguration('model_path'),
                 'conf': 0.35,
@@ -35,8 +35,8 @@ def generate_launch_description():
                 'device': 'auto',
                 'imgsz': 640,
                 'half': True,
-                'publish_overlay': False,
-                'target_classes': [0]
+                'publish_overlay': True,
+                'target_classes': [0,56,62,64]
             }]
         )
     ])

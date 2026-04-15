@@ -2,6 +2,7 @@ semantic_rgbd_node:
   ros__parameters:
     rgb_topic: "/camera/rgb/image_color"
     depth_topic: "/camera/depth/image"
-    mask_topic: "/semantic/mask"
+    mask_topic: "/semantic/combined_mask"
     mask_sync_tolerance: 0.08
     yolo_expected: true
+    dynamic_labels: [0]

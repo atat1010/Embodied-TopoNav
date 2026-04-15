@@ -130,7 +130,7 @@ def generate_launch_description():
         launch_arguments={
             'use_sim_time': LaunchConfiguration('play_bag'),
             'input_topic': '/camera/rgb/image_color',
-            'mask_topic': '/semantic/mask',
+            'combined_mask_topic': '/semantic/combined_mask',
             'overlay_topic': '/semantic/overlay',
             'model_path': default_model_path,
         }.items()
