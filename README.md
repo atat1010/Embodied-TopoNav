@@ -97,4 +97,28 @@ export DASHSCOPE_API_KEY="your_api_key_here"
 ros2 launch orb_slam3_ros2 semantic_slam.launch.py
 ```
 
+### 运行示例
+
+**点云地图**：
+![点云地图](image.png)
+
+**原始动态场景**：
+![原始动态场景](<without yolo.png>)
+
+**YOLO动态剔除**：
+![YOLO动态剔除](<with yolo.png>)
+
+**VLM交互**：
+![alt text](msg.png)
+![alt text](reply.png)
+
+---
+
+## TODO
+
+- [ ] **实机部署**：将系统迁移至 NVIDIA Jetson Orin 平台，结合 TensorRT 对 YOLOv8 进行 INT8 量化加速。
+- [ ] **深度图修复**：引入孔洞填充算法，应对真实世界（如玻璃、反光材质）造成的深度图缺失。
+- [ ] **Nav2 深度集成**：结合代价地图（Costmap），将大模型输出的粗略目标点交由局部规划器进行精细化碰撞检测与微调。
+- [ ] **人机交互**：脱离终端，构建真正方便的 Web UI，支持远程监控与指令输入。
+
 
