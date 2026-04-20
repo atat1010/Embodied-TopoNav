@@ -26,7 +26,7 @@ semantic_pointcloud_builder:
     instance_publish_every_n_frames: 60
     instance_cluster_voxel_leaf_size: 0.10
     max_points_for_instance_clustering: 40000
-    excluded_labels: [0, 255]
+    excluded_labels: [0]
 
     max_points_per_frame: 12000
 

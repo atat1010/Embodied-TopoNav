@@ -53,6 +53,7 @@ class YoloMaskNode(Node):
         self._latency_sum_ms = 0.0
         self._combined_convert_sum_ms = 0.0
         self._overlay_convert_sum_ms = 0.0
+        
         self._window_start = time.monotonic()
 
         try:

@@ -21,6 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
             'yolo_mask_node = yolo_semantic_ros2.yolo_mask_node:main',
+            'vlm_brain_node = yolo_semantic_ros2.vlm_brain_node:main',
         ],
     },
 )

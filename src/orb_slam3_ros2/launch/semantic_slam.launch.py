@@ -99,7 +99,7 @@ def generate_launch_description():
         DeclareLaunchArgument('use_viewer', default_value='true'),
         DeclareLaunchArgument('run_yolo', default_value='true'),
         DeclareLaunchArgument('run_eval', default_value='true'),
-        DeclareLaunchArgument('run_semantic_map', default_value='false'),
+        DeclareLaunchArgument('run_semantic_map', default_value='true'),
         DeclareLaunchArgument('play_bag', default_value='true'),
         DeclareLaunchArgument('shutdown_when_bag_done', default_value='true'),
         DeclareLaunchArgument('bag_path', default_value=default_bag_path),
@@ -141,6 +141,7 @@ def generate_launch_description():
         executable='semantic_rgbd_node',
         name='semantic_rgbd_node',
         output='screen',
+        prefix='xterm -e',
         arguments=[default_vocab_path, default_settings_path],
         parameters=[
             default_semantic_rgbd_yaml,
@@ -156,6 +157,8 @@ def generate_launch_description():
         executable='slam_eval_node.py',
         name='slam_eval_node',
         output='screen',
+        # prefix=['gnome-terminal --'],
+        prefix='xterm -e',
         condition=IfCondition(LaunchConfiguration('run_eval')),
         parameters=[
             default_slam_eval_yaml,
@@ -170,6 +173,7 @@ def generate_launch_description():
         executable='semantic_pointcloud_builder',
         name='semantic_pointcloud_builder',
         output='screen',
+        # prefix='xterm -e',
         condition=IfCondition(LaunchConfiguration('run_semantic_map')),
         parameters=[
             default_semantic_pc_yaml,

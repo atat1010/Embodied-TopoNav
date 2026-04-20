@@ -7,7 +7,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     home_dir = os.path.expanduser('~')
-    default_model_path = os.path.join(home_dir, 'semantic_slam_ws', 'src', 'weights', 'yolov8n-seg.pt')
+    default_model_path = os.path.join(home_dir, 'semantic_slam_ws', 'src', 'weights', 'yolov8s-seg.pt')
 
     declare_args = [
         DeclareLaunchArgument('use_sim_time', default_value='false'),
@@ -17,13 +17,17 @@ def generate_launch_description():
         DeclareLaunchArgument('model_path', default_value=default_model_path),
     ]
 
-    return LaunchDescription([
-        *declare_args,
-        Node(
+    vlm_args = [
+        DeclareLaunchArgument('base_url', default_value='https://dashscope.aliyuncs.com/compatible-mode/v1'),
+        DeclareLaunchArgument('model_name', default_value='qwen3-omni-flash'),
+    ]
+
+    yolo_node = Node(
             package='yolo_semantic_ros2',
             executable='yolo_mask_node',
             name='yolo_mask_node',
             output='screen',
+            prefix='xterm -e',
             parameters=[{
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
                 'input_topic': LaunchConfiguration('input_topic'),
@@ -35,8 +39,26 @@ def generate_launch_description():
                 'device': 'auto',
                 'imgsz': 640,
                 'half': True,
-                'publish_overlay': True,
+                'publish_overlay': False,
                 'target_classes': [0,56,62,64]
             }]
         )
+
+    vlm_node = Node(
+        package='yolo_semantic_ros2',
+        executable='vlm_brain_node',
+        name='vlm_brain_node',
+        output='screen',
+        # prefix='xterm -e',
+        parameters=[{
+            'base_url': LaunchConfiguration('base_url'),
+            'model_name': LaunchConfiguration('model_name')
+        }]
+    )
+
+    return LaunchDescription([
+        *declare_args,
+        *vlm_args,
+        yolo_node,
+        vlm_node
     ])
