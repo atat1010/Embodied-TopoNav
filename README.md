@@ -1,5 +1,5 @@
-# Embodied-TopoNav
-**基于 LLM 与 3D 空间长时记忆的轻量级具身语义导航系统**
+# LLM-CogMap
+**LLM-CogMap: 面向具身智能的轻量级 3D 语义拓扑建图与认知系统**
 
 ![ROS 2](https://img.shields.io/badge/ROS_2-Humble-blue.svg) ![C++17](https://img.shields.io/badge/C++-17-00599C.svg) ![Python3](https://img.shields.io/badge/Python-3.8+-FFD43B.svg)
 
@@ -7,7 +7,7 @@
 
 ##  项目简介
 
-`Embodied-TopoNav` 是一个面向边缘计算平台（如 NVIDIA Jetson 系列）设计的端云异构具身智能导航框架。项目针对传统 3D 稠密语义点云导航**带宽占用大、极易丢失目标、大模型缺乏空间几何概念**等痛点，提出了一套从“底层像素级感知”到“高层自然语言决策”的完整解耦架构。
+`LLM-CogMap` 是一个面向边缘计算平台（如 NVIDIA Jetson 系列）设计的端云异构具身智能导航框架。项目针对传统 3D 稠密语义点云导航**带宽占用大、极易丢失目标、大模型缺乏空间几何概念**等痛点，提出了一套从“底层像素级感知”到“高层自然语言决策”的完整解耦架构。
 
 目前，本系统已基于 **TUM RGB-D 数据集**完成了全链路 Software-in-the-Loop (SIL) 闭环验证。
 
@@ -71,7 +71,7 @@
 ```bash
 mkdir -p ~/semantic_slam_ws/src
 cd ~/semantic_slam_ws/src
-git clone https://github.com/atat1010/Embodied-TopoNav.git
+git clone https://github.com/atat1010/LLM-CogMap.git
 cd ..
 colcon build --symlink-install
 source install/setup.bash
