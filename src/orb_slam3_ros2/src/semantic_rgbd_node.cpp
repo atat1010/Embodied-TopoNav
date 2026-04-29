@@ -11,6 +11,7 @@
 #include <deque>
 #include <cstdlib>
 #include <cmath>
+#include <limits>
 #include <utility>
 #include <unordered_set>
 #include <Eigen/Geometry>
@@ -36,6 +37,7 @@ public:
         const auto depth_topic = this->get_parameter("depth_topic").as_string();
         const auto mask_topic = this->get_parameter("mask_topic").as_string();
         mask_sync_tolerance_sec_ = this->get_parameter("mask_sync_tolerance").as_double();
+        mask_buffer_window_sec_ = std::max(1.0, 3.0 * mask_sync_tolerance_sec_);
         yolo_expected_ = this->get_parameter("yolo_expected").as_bool();
         const auto dynamic_labels = this->get_parameter("dynamic_labels").as_integer_array();
         dynamic_labels_.clear();
@@ -108,16 +110,21 @@ private:
         const rclcpp::Time rgb_stamp(msgRGB->header.stamp);
         {
             std::lock_guard<std::mutex> lock(mask_mutex_);
-            if (!latest_mask_.empty()) {
-                const double dt = std::abs((rgb_stamp - latest_mask_stamp_).seconds());
-                // RCLCPP_INFO(this->get_logger(), "当前RGB帧时间戳: %.3f s, 最近mask时间戳: %.3f s, dt=%.3f s",
-                //     rgb_stamp.seconds(), latest_mask_stamp_.seconds(), dt);
-                if (dt <= mask_sync_tolerance_sec_) {
+            // 最近邻对齐：在缓存中找与当前 RGB 时间戳最接近的一帧 mask。
+            if (!mask_buffer_.empty()) {
+                int best_idx = -1;
+                double best_dt = std::numeric_limits<double>::infinity();
+                for (int i = 0; i < static_cast<int>(mask_buffer_.size()); ++i) {
+                    const double dt = std::abs((rgb_stamp - mask_buffer_[i].stamp).seconds());
+                    if (dt < best_dt) {
+                        best_dt = dt;
+                        best_idx = i;
+                    }
+                }
+                if (best_idx >= 0 && best_dt <= mask_sync_tolerance_sec_) {
+                    current_mask = mask_buffer_[best_idx].mask.clone();
                     has_valid_mask = true;
                 }
-            }
-            if (has_valid_mask) {
-                current_mask = latest_mask_.clone();
             }
         }
 
@@ -261,6 +268,13 @@ private:
                 latest_mask_stamp_ = rclcpp::Time(msgMask->header.stamp);
                 const double mask_ts = latest_mask_stamp_.seconds();
                 mask_arrival_timestamps_.push_back(mask_ts);
+
+                mask_buffer_.push_back(TimedMask{latest_mask_stamp_, slam_mask});
+                // 只保留最近一段时间窗口，既支持最近邻查找，也避免内存增长。
+                while (!mask_buffer_.empty() &&
+                       (latest_mask_stamp_ - mask_buffer_.front().stamp).seconds() > mask_buffer_window_sec_) {
+                    mask_buffer_.pop_front();
+                }
             }
         } catch (const cv_bridge::Exception& e) {
             RCLCPP_WARN(this->get_logger(), "mask cv_bridge 异常: %s", e.what());
@@ -279,16 +293,22 @@ private:
     
     typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::Image, sensor_msgs::msg::Image> MySyncPolicy;
     typedef message_filters::Synchronizer<MySyncPolicy> Sync;
+    struct TimedMask {
+        rclcpp::Time stamp;
+        cv::Mat mask;
+    };
     std::shared_ptr<Sync> sync_;
     std::mutex mask_mutex_;
     cv::Mat latest_mask_;
     rclcpp::Time latest_mask_stamp_{0, 0, RCL_ROS_TIME};
+    std::deque<TimedMask> mask_buffer_;
     std::deque<double> mask_arrival_timestamps_;
     std::deque<double> frame_timestamps_;
     std::deque<std::pair<double, bool>> frame_mask_usage_;
     rclcpp::Time last_fps_log_time_{0, 0, RCL_ROS_TIME};
     rclcpp::Time last_mask_mismatch_log_time_{0, 0, RCL_ROS_TIME};
     double mask_sync_tolerance_sec_{0.08};
+    double mask_buffer_window_sec_{1.0};
     bool yolo_expected_{false};
     std::unordered_set<uint8_t> dynamic_labels_;
 };
