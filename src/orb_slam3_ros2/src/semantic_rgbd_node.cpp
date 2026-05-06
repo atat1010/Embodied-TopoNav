@@ -37,7 +37,7 @@ public:
         const auto depth_topic = this->get_parameter("depth_topic").as_string();
         const auto mask_topic = this->get_parameter("mask_topic").as_string();
         mask_sync_tolerance_sec_ = this->get_parameter("mask_sync_tolerance").as_double();
-        mask_buffer_window_sec_ = std::max(1.0, 3.0 * mask_sync_tolerance_sec_);
+        mask_buffer_window_sec_ = std::max(0.5, 3.0 * mask_sync_tolerance_sec_);
         yolo_expected_ = this->get_parameter("yolo_expected").as_bool();
         const auto dynamic_labels = this->get_parameter("dynamic_labels").as_integer_array();
         dynamic_labels_.clear();
