@@ -89,6 +89,7 @@ public:
     voxel_leaf_size_ = this->declare_parameter<double>("voxel_leaf_size", 0.05);
     depth_min_ = this->declare_parameter<double>("depth_min", 0.1);
     depth_max_ = this->declare_parameter<double>("depth_max", 8.0);
+    stale_miss_frames_ = static_cast<int>(this->declare_parameter<int64_t>("stale_miss_frames", 120));
     // world_align_roll_deg_ = this->declare_parameter<double>("world_align_roll_deg", -90.0);
 
     const auto rgb_topic = this->declare_parameter<std::string>("rgb_topic", "/camera/rgb/image_color");
@@ -381,13 +382,13 @@ private:
     local_cloud->height = 1;
     local_cloud->is_dense = false;
 
+    // 每帧先增加所有全局实例的连续未观测计数（与是否检测到物体无关）
+    for (auto &inst : global_instances_) {
+      inst.miss_count++;
+    }
+
     // Process collected per-instance points to compute centroid and AABB, then publish JSON.
     if (!instance_points.empty()) {
-      
-      // --- 【新增】所有老熟人的“失踪计数器”先加 1 ---
-      for (auto &inst : global_instances_) {
-          inst.miss_count++;
-      }
 
       // 本帧一一匹配：防止多个临时实例抢同一个全局实例，导致近距离同类被合并。
       std::unordered_set<int> matched_global_ids;
@@ -453,7 +454,7 @@ private:
           global_inst.aabb_min = 0.8f * global_inst.aabb_min + 0.2f * curr_min;
           global_inst.aabb_max = 0.8f * global_inst.aabb_max + 0.2f * curr_max;
           global_inst.hit_count++;
-          global_inst.miss_count = 0;
+          global_inst.miss_count = 0; // 本帧再次观测到，连续未观测清零
           matched_global_ids.insert(global_inst.id);
           matched = true;
         }
@@ -480,8 +481,8 @@ private:
                     // 【考察期】：没看够 10 次，且丢失超过 30 帧（1.5秒）。直接抹杀！
                     return inst.miss_count > 30; 
                 } else {
-                    // 【转正期】：真实物体！绝对抗遮挡，永远存在于地图中！
-                    return false; 
+                    // 【转正期】：保留在内存中；长期未观测时降级为 stale（仍可在 JSON 输出）
+                    return false;
                 }
             }),
         global_instances_.end()
@@ -498,8 +499,12 @@ private:
 
         if (!first_inst) json += ", ";
         first_inst = false;
+        const std::string state_json =
+            (inst.miss_count >= stale_miss_frames_) ? "\"stale\"" : "\"active\"";
         json += "{\"instance_id\": " + std::to_string(inst.id) +
                 ", \"semantic_id\": " + std::to_string(inst.semantic_id) +
+                ", \"state\": " + state_json +
+                ", \"miss_count\": " + std::to_string(inst.miss_count) +
                 ", \"forward_distance_m\": " + std::to_string(inst.centroid.x()) +
                 ", \"centroid\": [" + std::to_string(inst.centroid.x()) + "," + std::to_string(inst.centroid.y()) + "," + std::to_string(inst.centroid.z()) + "]" +
                 ", \"aabb_min\": [" + std::to_string(inst.aabb_min.x()) + "," + std::to_string(inst.aabb_min.y()) + "," + std::to_string(inst.aabb_min.z()) + "]" +
@@ -540,6 +545,7 @@ private:
   double voxel_leaf_size_{};
   double depth_min_{};
   double depth_max_{};
+  int stale_miss_frames_{120};
   // double world_align_roll_deg_{};
   std::unordered_set<uint8_t> excluded_labels_;
 

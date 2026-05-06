@@ -101,11 +101,16 @@ class VLMBrainNode(Node):
             translated_inst = {
                 "instance_id": inst_id,
                 "class_name": class_name,  # 核心改动：大模型直接看这个名字！
+                "state": inst_data.get('state', 'active'),
+                "miss_count": inst_data.get('miss_count'),
                 "centroid": inst_data.get('centroid'),
                 "aabb_min": inst_data.get('aabb_min'),
                 "aabb_max": inst_data.get('aabb_max')
             }
             translated_memory.append(translated_inst)
+
+        # active 优先列出，stale 作为低优先级历史记忆排在后面
+        translated_memory.sort(key=lambda x: (x.get('state') == 'stale', x['instance_id']))
 
         # 将当前的内存转换为 LLM 易读的简写形式（节省 token）
         memory_snapshot = json.dumps(translated_memory, indent=2, ensure_ascii=False)
@@ -115,6 +120,10 @@ class VLMBrainNode(Node):
             "- X轴（深度）：值越大越远。\n"
             "- Y轴（左右）：【绝对警告】Y为正数(+)代表在左边！Y为负数(-)代表在右边！注意：正负号决定左右，正数是左，负数是右！\n"
             "- Z轴（高度）：值越大越高。\n\n"
+            "【语义记忆状态 state】：\n"
+            "- state=\"active\"：近期仍被观测更新，可较高优先级用于导航决策。\n"
+            "- state=\"stale\"：仅表示历史记忆中的最后一次估计位置，不代表物体此刻仍在该处；"
+            "推理与选目标时必须低于 active 使用，优先选择 active；若只用 stale，须在 [思考] 中明确不确定性。\n\n"
             "【任务规则】：\n"
             "1. 面对寻找特定方位物体（如左边、右边）的指令，你必须严格提取所有候选物体的 Y 轴坐标。\n"
             "2. 你【必须】严格按照以下格式输出，绝对不能省略 [思考] 环节：\n\n"
@@ -165,6 +174,11 @@ class VLMBrainNode(Node):
         if not obj:
             self.get_logger().error(f"错误：ID {instance_id} 不在记忆中！")
             return
+
+        if obj.get('state') == 'stale':
+            self.get_logger().warn(
+                f"导航目标 instance_id={instance_id} 为 stale（历史记忆），位置可能已过时。"
+            )
 
         # 提取质心 (FLU 坐标系: X前, Y左, Z上)
         cx, cy, cz = obj['centroid']
